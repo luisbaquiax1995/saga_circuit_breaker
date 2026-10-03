@@ -1,0 +1,1142 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Saga vs Circuit Breaker Pattern - Microservices PoC</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    colors: {
+                        brand: {
+                            50: '#eef2ff',
+                            100: '#e0e7ff',
+                            200: '#c7d2fe',
+                            500: '#6366f1',
+                            600: '#4f46e5',
+                            700: '#4338ca',
+                            900: '#312e81',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body {
+            background-color: #f8fafc;
+            color: #0f172a;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        .slide {
+            display: none;
+            opacity: 0;
+            transform: translateY(12px) scale(0.995);
+            transition: opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1), transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .slide.active {
+            display: flex;
+            opacity: 1;
+            transform: translateY(0) scale(1);
+        }
+
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(226, 232, 240, 0.9);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.03), 0 2px 4px -2px rgba(0, 0, 0, 0.03);
+        }
+
+        .glass-panel-hover {
+            transition: all 0.25s ease;
+        }
+        .glass-panel-hover:hover {
+            border-color: rgba(99, 102, 241, 0.4);
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px -5px rgba(99, 102, 241, 0.12), 0 8px 10px -6px rgba(0, 0, 0, 0.04);
+        }
+
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 3px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+
+        .glow-effect {
+            box-shadow: 0 10px 30px -5px rgba(79, 70, 229, 0.15);
+        }
+    </style>
+</head>
+<body class="h-screen w-screen flex flex-col justify-between font-sans antialiased text-slate-800 bg-slate-50">
+
+    <!-- Top Navigation & Progress Bar -->
+    <header class="w-full z-50 glass-panel border-b border-slate-200 px-6 py-3 flex items-center justify-between shrink-0">
+        <div class="flex items-center gap-3">
+            <div class="h-9 w-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-indigo-500 flex items-center justify-center text-white shadow-md shadow-indigo-500/20 font-extrabold text-sm">
+                PoC
+            </div>
+            <div>
+                <h1 class="text-sm font-bold tracking-wide text-slate-900 flex items-center gap-2">
+                    <span>Saga Pattern</span> 
+                    <span class="text-indigo-600 font-semibold">vs</span> 
+                    <span>Circuit Breaker Pattern</span>
+                </h1>
+                <p class="text-xs text-slate-500">Flujo de compra en E-Commerce con Microservicios</p>
+            </div>
+        </div>
+
+        <!-- Slide Indicator Badge -->
+        <div class="flex items-center gap-4">
+            <span class="text-xs font-mono bg-indigo-50 border border-indigo-200 px-3 py-1 rounded-full text-indigo-700 font-semibold">
+                Slide <span id="current-slide-num">1</span> / <span id="total-slides-num">13</span>
+            </span>
+            <button id="fullscreen-btn" onclick="toggleFullscreen()" title="Pantalla completa" class="p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors">
+                <i class="fa-solid fa-expand text-sm"></i>
+            </button>
+        </div>
+    </header>
+
+    <!-- Top Progress Bar -->
+    <div class="w-full bg-slate-200 h-1.5 w-full overflow-hidden shrink-0">
+        <div id="progress-bar" class="h-full bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 transition-all duration-300 w-0"></div>
+    </div>
+
+    <!-- Main Content Container -->
+    <main class="flex-1 relative overflow-hidden p-4 md:p-8 flex items-center justify-center">
+
+        <!-- SLIDE 1: Title Slide -->
+        <section class="slide active flex-col justify-center items-center text-center max-w-5xl mx-auto w-full h-full my-auto">
+            <div class="inline-flex items-center gap-2 px-4 py-2 rounded-full glass-panel border border-indigo-200 text-indigo-700 text-xs font-bold mb-6 uppercase tracking-wider shadow-sm bg-indigo-50/80">
+                <i class="fa-solid fa-layer-group text-indigo-600"></i> Arquitectura de Software & Resiliencia
+            </div>
+            <h1 class="text-4xl md:text-6xl font-extrabold tracking-tight text-slate-900 mb-6 leading-tight">
+                Saga Pattern <span class="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600">vs</span> Circuit Breaker
+            </h1>
+            <p class="text-lg md:text-xl text-slate-600 max-w-3xl mb-10 leading-relaxed font-normal">
+                Garantizando <strong class="text-indigo-700 font-semibold">Consistencia de Datos</strong> y <strong class="text-emerald-700 font-semibold">Resiliencia ante Fallos</strong> en un flujo distribuido de compra e-commerce.
+            </p>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-3xl text-left">
+                <div class="glass-panel p-6 rounded-2xl border-l-4 border-l-indigo-600 glass-panel-hover">
+                    <div class="flex items-center gap-3 mb-2">
+                        <i class="fa-solid fa-diagram-project text-xl text-indigo-600"></i>
+                        <h3 class="font-bold text-lg text-slate-900">Patrón Saga</h3>
+                    </div>
+                    <p class="text-xs text-slate-600 leading-relaxed">Resuelve la consistencia de datos entre servicios mediante transacciones locales y compensaciones paso a paso.</p>
+                </div>
+                <div class="glass-panel p-6 rounded-2xl border-l-4 border-l-emerald-600 glass-panel-hover">
+                    <div class="flex items-center gap-3 mb-2">
+                        <i class="fa-solid fa-bolt text-xl text-emerald-600"></i>
+                        <h3 class="font-bold text-lg text-slate-900">Circuit Breaker</h3>
+                    </div>
+                    <p class="text-xs text-slate-600 leading-relaxed">Protege contra fallos en cascada aislando dependencias inestables con corte de peticiones rápido (fail-fast).</p>
+                </div>
+            </div>
+
+            <div class="mt-12 flex items-center gap-2 text-xs text-slate-500">
+                <span class="px-3 py-1.5 bg-white rounded-lg border border-slate-300 shadow-sm font-medium text-slate-600">Usa las flechas &larr; &rarr; para navegar</span>
+            </div>
+        </section>
+
+        <!-- SLIDE 2: 1. El Problema -->
+        <section class="slide flex-col justify-center max-w-5xl mx-auto w-full h-full">
+            <div class="flex items-center gap-3 mb-3">
+                <span class="text-xs font-mono px-3 py-1 bg-indigo-100 border border-indigo-200 text-indigo-800 rounded-md font-bold">SECCIÓN 01</span>
+                <h2 class="text-2xl md:text-3xl font-bold text-slate-900">El Problema de los Microservicios</h2>
+            </div>
+            <p class="text-sm text-slate-600 mb-8">¿Por qué fallan los paradigmas monolíticos tradicionales en arquitecturas distribuidas?</p>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                <!-- Subproblema 1 -->
+                <div class="glass-panel p-6 rounded-2xl border-t-4 border-amber-500 bg-gradient-to-b from-amber-50/40 to-white">
+                    <div class="w-12 h-12 rounded-xl bg-amber-100 border border-amber-200 flex items-center justify-center text-amber-700 text-xl mb-4 shadow-sm">
+                        <i class="fa-solid fa-database"></i>
+                    </div>
+                    <h3 class="text-lg font-bold text-slate-900 mb-2">1. Sin Transacciones ACID Distribuidas</h3>
+                    <p class="text-xs text-slate-600 leading-relaxed mb-4">
+                        Cada microservicio posee su propia base de datos independiente (Database-per-service). 
+                        No existe un rollback global nativo de la BD si una operación posterior falla a mitad de un proceso de negocio.
+                    </p>
+                    <div class="p-3 bg-slate-900 rounded-xl text-xs text-amber-300 font-mono shadow-inner">
+                        Db_Orders &ne; Db_Payments &ne; Db_Inventory
+                    </div>
+                </div>
+
+                <!-- Subproblema 2 -->
+                <div class="glass-panel p-6 rounded-2xl border-t-4 border-rose-500 bg-gradient-to-b from-rose-50/40 to-white">
+                    <div class="w-12 h-12 rounded-xl bg-rose-100 border border-rose-200 flex items-center justify-center text-rose-700 text-xl mb-4 shadow-sm">
+                        <i class="fa-solid fa-network-wired"></i>
+                    </div>
+                    <h3 class="text-lg font-bold text-slate-900 mb-2">2. Fallos en Cascada y Saturación</h3>
+                    <p class="text-xs text-slate-600 leading-relaxed mb-4">
+                        Si un servicio dependiente (ej. Pagos) se vuelve lento o cae, las llamadas repetidas de los clientes acumulan hilos, sockets y recursos, provocando el colapso de toda la red.
+                    </p>
+                    <div class="p-3 bg-slate-900 rounded-xl text-xs text-rose-300 font-mono shadow-inner">
+                        Timeout Accumulation &rarr; Exhaustion of Thread Pools
+                    </div>
+                </div>
+            </div>
+
+            <!-- Soluciones -->
+            <div class="glass-panel p-5 rounded-xl border border-indigo-200 bg-indigo-50/60 flex flex-col md:flex-row items-center justify-between gap-4">
+                <div class="flex items-center gap-4">
+                    <div class="p-3 bg-indigo-600 text-white rounded-xl text-lg shadow-md">
+                        <i class="fa-solid fa-shield-halved"></i>
+                    </div>
+                    <div>
+                        <h4 class="text-sm font-bold text-slate-900">Dos patrones especializados para cada reto:</h4>
+                        <p class="text-xs text-slate-600"><strong class="text-indigo-700">Saga</strong> resuelve consistencia de datos &bull; <strong class="text-emerald-700">Circuit Breaker</strong> resuelve resiliencia de infraestructura.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- SLIDE 3: 2. Patrón Saga -->
+        <section class="slide flex-col justify-center max-w-5xl mx-auto w-full h-full">
+            <div class="flex items-center gap-3 mb-3">
+                <span class="text-xs font-mono px-3 py-1 bg-indigo-100 border border-indigo-200 text-indigo-800 rounded-md font-bold">SECCIÓN 02</span>
+                <h2 class="text-2xl md:text-3xl font-bold text-slate-900">El Patrón Saga: Conceptos Clave</h2>
+            </div>
+            <p class="text-sm text-slate-600 mb-6">Secuencia de transacciones locales para mantener la consistencia eventual.</p>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                <div class="glass-panel p-5 rounded-2xl glass-panel-hover flex flex-col justify-between border-t-2 border-indigo-500">
+                    <div>
+                        <div class="text-indigo-600 font-extrabold text-3xl mb-2">01</div>
+                        <h3 class="text-base font-bold text-slate-900 mb-2">Transacciones Locales</h3>
+                        <p class="text-xs text-slate-600 leading-relaxed">
+                            Cada paso ejecuta una transacción independiente en la base de datos de un único servicio y emite una confirmación.
+                        </p>
+                    </div>
+                    <div class="mt-4 pt-3 border-t border-slate-200 text-xs text-indigo-700 font-mono font-bold">T1 &rarr; T2 &rarr; T3 &rarr; T4</div>
+                </div>
+
+                <div class="glass-panel p-5 rounded-2xl glass-panel-hover flex flex-col justify-between border-t-2 border-amber-500">
+                    <div>
+                        <div class="text-amber-600 font-extrabold text-3xl mb-2">02</div>
+                        <h3 class="text-base font-bold text-slate-900 mb-2">Transacciones Compensatorias</h3>
+                        <p class="text-xs text-slate-600 leading-relaxed">
+                            No existe `ROLLBACK` automático. Si el paso 3 falla, se ejecutan operaciones explícitas que revierten los cambios anteriores (C2, C1).
+                        </p>
+                    </div>
+                    <div class="mt-4 pt-3 border-t border-slate-200 text-xs text-amber-700 font-mono font-bold">C2 &larr; C1 (Undo operations)</div>
+                </div>
+
+                <div class="glass-panel p-5 rounded-2xl glass-panel-hover flex flex-col justify-between border-t-2 border-purple-500">
+                    <div>
+                        <div class="text-purple-600 font-extrabold text-3xl mb-2">03</div>
+                        <h3 class="text-base font-bold text-slate-900 mb-2">Dos Modos de Coordinación</h3>
+                        <p class="text-xs text-slate-600 leading-relaxed">
+                            Puede implementarse mediante eventos distribuidos (<strong class="text-slate-900">Coreografía</strong>) o mediante un controlador central (<strong class="text-slate-900">Orquestación</strong>).
+                        </p>
+                    </div>
+                    <div class="mt-4 pt-3 border-t border-slate-200 text-xs text-purple-700 font-mono font-bold">Choreography vs Orchestration</div>
+                </div>
+            </div>
+
+            <!-- Saga Diagram Conceptual -->
+            <div class="glass-panel p-5 rounded-xl border border-slate-300 bg-white shadow-sm">
+                <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Flujo de Compensación en Saga</h4>
+                <div class="flex items-center justify-between text-xs gap-2 overflow-x-auto pb-2">
+                    <div class="flex-1 bg-emerald-50 p-3 rounded-lg border border-emerald-300 text-center">
+                        <span class="text-emerald-800 font-bold block">1. Crear Orden</span>
+                        <span class="text-[10px] text-emerald-600">Éxito (T1)</span>
+                    </div>
+                    <i class="fa-solid fa-arrow-right text-slate-400"></i>
+                    <div class="flex-1 bg-emerald-50 p-3 rounded-lg border border-emerald-300 text-center">
+                        <span class="text-emerald-800 font-bold block">2. Procesar Pago</span>
+                        <span class="text-[10px] text-emerald-600">Éxito (T2)</span>
+                    </div>
+                    <i class="fa-solid fa-arrow-right text-slate-400"></i>
+                    <div class="flex-1 bg-rose-50 p-3 rounded-lg border border-rose-300 text-center">
+                        <span class="text-rose-800 font-bold block">3. Reservar Stock</span>
+                        <span class="text-[10px] text-rose-600 font-bold">&times; FALLO (T3)</span>
+                    </div>
+                    <i class="fa-solid fa-arrow-left text-amber-500"></i>
+                    <div class="flex-1 bg-amber-50 p-3 rounded-lg border border-amber-300 text-center">
+                        <span class="text-amber-800 font-bold block">Compensar Pago</span>
+                        <span class="text-[10px] text-amber-600">Reembolsar (C2)</span>
+                    </div>
+                    <i class="fa-solid fa-arrow-left text-amber-500"></i>
+                    <div class="flex-1 bg-amber-50 p-3 rounded-lg border border-amber-300 text-center">
+                        <span class="text-amber-800 font-bold block">Compensar Orden</span>
+                        <span class="text-[10px] text-amber-600">Cancelar (C1)</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- SLIDE 4: 3. Saga Coreografía -->
+        <section class="slide flex-col justify-center max-w-5xl mx-auto w-full h-full">
+            <div class="flex items-center gap-3 mb-3">
+                <span class="text-xs font-mono px-3 py-1 bg-indigo-100 border border-indigo-200 text-indigo-800 rounded-md font-bold">SECCIÓN 03</span>
+                <h2 class="text-2xl md:text-3xl font-bold text-slate-900">Saga: Coreografía</h2>
+            </div>
+            <p class="text-sm text-slate-600 mb-6">Coordinación descentralizada basada en eventos emitidos por cada servicio.</p>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                <!-- Ventajas -->
+                <div class="glass-panel p-6 rounded-2xl border-t-4 border-emerald-500 bg-gradient-to-b from-emerald-50/30 to-white">
+                    <h3 class="text-base font-bold text-emerald-800 mb-4 flex items-center gap-2">
+                        <i class="fa-solid fa-circle-check text-emerald-600"></i> Ventajas de la Coreografía
+                    </h3>
+                    <ul class="space-y-3 text-xs text-slate-700">
+                        <li class="flex items-start gap-2">
+                            <i class="fa-solid fa-check text-emerald-600 mt-0.5"></i>
+                            <span><strong class="text-slate-900">Bajo acoplamiento:</strong> Los servicios no se conocen directamente entre sí, solo responden a eventos del broker.</span>
+                        </li>
+                        <li class="flex items-start gap-2">
+                            <i class="fa-solid fa-check text-emerald-600 mt-0.5"></i>
+                            <span><strong class="text-slate-900">Alta escalabilidad:</strong> Sin un punto central de control que se transforme en un cuello de botella.</span>
+                        </li>
+                        <li class="flex items-start gap-2">
+                            <i class="fa-solid fa-check text-emerald-600 mt-0.5"></i>
+                            <span>Ideal para flujos simples con pocos servicios independientes.</span>
+                        </li>
+                    </ul>
+                </div>
+
+                <!-- Desventajas -->
+                <div class="glass-panel p-6 rounded-2xl border-t-4 border-rose-500 bg-gradient-to-b from-rose-50/30 to-white">
+                    <h3 class="text-base font-bold text-rose-800 mb-4 flex items-center gap-2">
+                        <i class="fa-solid fa-circle-xmark text-rose-600"></i> Desventajas
+                    </h3>
+                    <ul class="space-y-3 text-xs text-slate-700">
+                        <li class="flex items-start gap-2">
+                            <i class="fa-solid fa-xmark text-rose-600 mt-0.5"></i>
+                            <span><strong class="text-slate-900">Complejidad visual:</strong> Difícil ver el flujo completo del proceso "de un vistazo".</span>
+                        </li>
+                        <li class="flex items-start gap-2">
+                            <i class="fa-solid fa-xmark text-rose-600 mt-0.5"></i>
+                            <span><strong class="text-slate-900">Trazabilidad compleja:</strong> Depurar y rastrear dónde se detuvo un pedido requiere Distributed Tracing avanzado.</span>
+                        </li>
+                        <li class="flex items-start gap-2">
+                            <i class="fa-solid fa-xmark text-rose-600 mt-0.5"></i>
+                            <span>Requiere despliegue obligatorio de un broker de eventos (Kafka / RabbitMQ).</span>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Architecture Schema Coreography -->
+            <div class="glass-panel p-4 rounded-xl border border-slate-300 bg-white flex items-center justify-around text-xs shadow-sm">
+                <div class="bg-slate-100 p-3 rounded-lg border border-indigo-200 text-center font-bold text-slate-800">Order Service</div>
+                <i class="fa-solid fa-arrows-split-up-and-left text-indigo-600 text-lg"></i>
+                <div class="bg-purple-100 border border-purple-300 px-5 py-2.5 rounded-lg text-purple-900 font-mono font-bold text-center">
+                    Event Broker<br/><span class="text-[10px] font-normal text-purple-700">(Kafka / RabbitMQ)</span>
+                </div>
+                <i class="fa-solid fa-arrows-split-up-and-left text-indigo-600 text-lg"></i>
+                <div class="bg-slate-100 p-3 rounded-lg border border-indigo-200 text-center font-bold text-slate-800">Payment Service</div>
+            </div>
+        </section>
+
+        <!-- SLIDE 5: 4 & 5. Saga Orquestación & Por qué la elegimos -->
+        <section class="slide flex-col justify-center max-w-5xl mx-auto w-full h-full">
+            <div class="flex items-center justify-between mb-3">
+                <div class="flex items-center gap-3">
+                    <span class="text-xs font-mono px-3 py-1 bg-indigo-100 border border-indigo-200 text-indigo-800 rounded-md font-bold">SECCIÓN 04 & 05</span>
+                    <h2 class="text-2xl md:text-3xl font-bold text-slate-900">Saga: Orquestación</h2>
+                </div>
+                <span class="bg-indigo-600 text-white font-semibold text-xs px-3 py-1 rounded-full shadow-sm">Seleccionado para la PoC</span>
+            </div>
+            <p class="text-sm text-slate-600 mb-6">Un orquestador central coordina las llamadas y decisiones de compensación.</p>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                <!-- Ventajas & Desventajas -->
+                <div class="glass-panel p-5 rounded-2xl flex flex-col justify-between">
+                    <div>
+                        <h3 class="text-sm font-bold text-indigo-800 mb-3 uppercase tracking-wider">Pros & Cons</h3>
+                        <div class="space-y-3 text-xs">
+                            <div class="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-slate-800">
+                                <strong class="text-emerald-800">&check; Flujo Explícito:</strong> Fácil de leer, mantener y auditar en un solo punto de código.
+                            </div>
+                            <div class="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-slate-800">
+                                <strong class="text-emerald-800">&check; Gran Trazabilidad:</strong> Es trivial consultar el estado exacto del pedido en tiempo real.
+                            </div>
+                            <div class="p-3 bg-rose-50 border border-rose-200 rounded-xl text-slate-800">
+                                <strong class="text-rose-800">&times; Punto de Acoplamiento:</strong> Requiere cuidar no concentrar demasiada lógica de negocio en el orquestador.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Por qué elegimos Orquestación en la PoC -->
+                <div class="glass-panel p-5 rounded-2xl border-l-4 border-l-indigo-600 bg-indigo-50/40">
+                    <h3 class="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">
+                        <i class="fa-solid fa-lightbulb text-amber-500 text-base"></i> Justificación de Selección en la PoC
+                    </h3>
+                    <ul class="space-y-3 text-xs text-slate-700">
+                        <li class="flex items-start gap-2">
+                            <i class="fa-solid fa-circle-dot text-indigo-600 mt-1 text-[10px]"></i>
+                            <span><strong class="text-slate-900">Solo 4 pasos de negocio:</strong> Flujo ideal para ser centralizado y presentado en vivo.</span>
+                        </li>
+                        <li class="flex items-start gap-2">
+                            <i class="fa-solid fa-circle-dot text-indigo-600 mt-1 text-[10px]"></i>
+                            <span><strong class="text-slate-900">Sin infraestructura pesada:</strong> No requiere desplegar Kafka o RabbitMQ únicamente para la demostración.</span>
+                        </li>
+                        <li class="flex items-start gap-2">
+                            <i class="fa-solid fa-circle-dot text-indigo-600 mt-1 text-[10px]"></i>
+                            <span><strong class="text-slate-900">Observabilidad inmediata:</strong> Permite consultar en cualquier instante:
+                                <code class="block mt-1.5 font-mono text-[11px] bg-slate-900 text-indigo-300 px-3 py-1.5 rounded-lg">GET /orders/{id}/status</code>
+                            </span>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Architecture Diagram -->
+            <div class="glass-panel p-4 rounded-xl border border-indigo-200 bg-white shadow-sm">
+                <div class="text-center text-xs font-semibold text-slate-700 mb-3">
+                    Arquitectura PoC: <span class="text-indigo-600 font-bold">Order</span> &rarr; <span class="text-indigo-600 font-bold">Payment</span> &rarr; <span class="text-indigo-600 font-bold">Inventory</span> &rarr; <span class="text-indigo-600 font-bold">Shipping</span>
+                </div>
+                <div class="flex items-center justify-center gap-3 text-xs">
+                    <div class="px-4 py-2 bg-indigo-600 font-bold text-white rounded-xl shadow-md">
+                        Saga Orchestrator Service
+                    </div>
+                    <i class="fa-solid fa-arrows-rotate text-indigo-600 animate-spin text-lg" style="animation-duration: 8s;"></i>
+                    <div class="text-slate-700 font-mono text-[11px] bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-300">
+                        Llamadas REST Síncronas protegidas por Circuit Breakers
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- SLIDE 6: 6. Patrón Circuit Breaker -->
+        <section class="slide flex-col justify-center max-w-5xl mx-auto w-full h-full">
+            <div class="flex items-center gap-3 mb-3">
+                <span class="text-xs font-mono px-3 py-1 bg-emerald-100 border border-emerald-200 text-emerald-800 rounded-md font-bold">SECCIÓN 06</span>
+                <h2 class="text-2xl md:text-3xl font-bold text-slate-900">El Patrón Circuit Breaker</h2>
+            </div>
+            <p class="text-sm text-slate-600 mb-6">Protegiendo la infraestructura contra degradaciones y fallos en cascada.</p>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                <div class="glass-panel p-5 rounded-2xl border-t-4 border-emerald-500 glass-panel-hover">
+                    <div class="text-emerald-600 text-3xl mb-3"><i class="fa-solid fa-shield-cat"></i></div>
+                    <h3 class="text-sm font-bold text-slate-900 mb-2">Wrapper de Monitoreo</h3>
+                    <p class="text-xs text-slate-600 leading-relaxed">
+                        Envuelve cada llamada HTTP/gRPC saliente hacia un microservicio dependiente y registra las tasas de éxito/error.
+                    </p>
+                </div>
+
+                <div class="glass-panel p-5 rounded-2xl border-t-4 border-rose-500 glass-panel-hover">
+                    <div class="text-rose-600 text-3xl mb-3"><i class="fa-solid fa-bolt-lightning"></i></div>
+                    <h3 class="text-sm font-bold text-slate-900 mb-2">Corte Inmediato (Fail-Fast)</h3>
+                    <p class="text-xs text-slate-600 leading-relaxed">
+                        Si las fallas superan un umbral prefijado, el circuito se abre y rechaza peticiones subsiguientes de inmediato sin llamar a la red.
+                    </p>
+                </div>
+
+                <div class="glass-panel p-5 rounded-2xl border-t-4 border-blue-500 glass-panel-hover">
+                    <div class="text-blue-600 text-3xl mb-3"><i class="fa-solid fa-microchip"></i></div>
+                    <h3 class="text-sm font-bold text-slate-900 mb-2">Protección de Recursos</h3>
+                    <p class="text-xs text-slate-600 leading-relaxed">
+                        Evita que el cliente agote sus hilos, sockets de red y memoria esperando timeouts de un servicio que ya está caído.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Analogy Banner -->
+            <div class="glass-panel p-5 rounded-xl border border-emerald-200 bg-emerald-50/50 flex items-center gap-4">
+                <div class="p-3 bg-emerald-600 text-white rounded-xl text-xl shrink-0 shadow-md">
+                    <i class="fa-solid fa-plug-circle-bolt"></i>
+                </div>
+                <p class="text-xs text-slate-700 leading-relaxed">
+                    <strong class="text-slate-900">Analogía Eléctrica:</strong> Igual que el interruptor diferencial de una vivienda corta la corriente para evitar un incendio tras un cortocircuito, el Circuit Breaker corta el tráfico para evitar la caída total del sistema.
+                </p>
+            </div>
+        </section>
+
+        <!-- SLIDE 7: 7. Los 3 Estados (Interactive visualizer) -->
+        <section class="slide flex-col justify-center max-w-5xl mx-auto w-full h-full">
+            <div class="flex items-center gap-3 mb-2">
+                <span class="text-xs font-mono px-3 py-1 bg-emerald-100 border border-emerald-200 text-emerald-800 rounded-md font-bold">SECCIÓN 07</span>
+                <h2 class="text-2xl md:text-3xl font-bold text-slate-900">Los 3 Estados del Circuit Breaker</h2>
+            </div>
+            <p class="text-sm text-slate-600 mb-6">Máquina de estados finitos que gobierna la resiliencia.</p>
+
+            <!-- Interactive State Visualizer -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <!-- CLOSED -->
+                <div id="state-closed-card" class="glass-panel p-5 rounded-2xl border-2 border-emerald-500 bg-emerald-50/30 relative overflow-hidden transition-all duration-300 shadow-md">
+                    <div class="flex items-center justify-between mb-3">
+                        <span class="px-2.5 py-1 bg-emerald-100 text-emerald-800 font-bold font-mono text-xs rounded-md border border-emerald-300">CLOSED</span>
+                        <i class="fa-solid fa-circle-check text-emerald-600 text-xl"></i>
+                    </div>
+                    <h3 class="text-sm font-bold text-slate-900 mb-2">Operación Normal</h3>
+                    <p class="text-xs text-slate-600 leading-relaxed mb-3">
+                        Las peticiones pasan al servicio real. Se registran éxitos y fallos en un buffer de ventana deslizante.
+                    </p>
+                    <div class="text-[11px] text-emerald-700 font-mono font-bold">Peticiones &rarr; Permitidas</div>
+                </div>
+
+                <!-- OPEN -->
+                <div id="state-open-card" class="glass-panel p-5 rounded-2xl border border-slate-300 opacity-50 relative overflow-hidden transition-all duration-300">
+                    <div class="flex items-center justify-between mb-3">
+                        <span class="px-2.5 py-1 bg-rose-100 text-rose-800 font-bold font-mono text-xs rounded-md border border-rose-300">OPEN</span>
+                        <i class="fa-solid fa-triangle-exclamation text-rose-600 text-xl"></i>
+                    </div>
+                    <h3 class="text-sm font-bold text-slate-900 mb-2">Circuito Abierto (Fail-Fast)</h3>
+                    <p class="text-xs text-slate-600 leading-relaxed mb-3">
+                        Se rechazan todas las peticiones inmediatamente sin contactar al servicio. Retorna Fallback o Excepción.
+                    </p>
+                    <div class="text-[11px] text-rose-700 font-mono font-bold">Peticiones &rarr; Bloqueadas</div>
+                </div>
+
+                <!-- HALF-OPEN -->
+                <div id="state-halfopen-card" class="glass-panel p-5 rounded-2xl border border-slate-300 opacity-50 relative overflow-hidden transition-all duration-300">
+                    <div class="flex items-center justify-between mb-3">
+                        <span class="px-2.5 py-1 bg-amber-100 text-amber-800 font-bold font-mono text-xs rounded-md border border-amber-300">HALF-OPEN</span>
+                        <i class="fa-solid fa-vial text-amber-600 text-xl"></i>
+                    </div>
+                    <h3 class="text-sm font-bold text-slate-900 mb-2">Prueba de Recuperación</h3>
+                    <p class="text-xs text-slate-600 leading-relaxed mb-3">
+                        Tras vencer el `waitDuration`, se permite un número limitado de llamadas de prueba para evaluar si el backend revivió.
+                    </p>
+                    <div class="text-[11px] text-amber-700 font-mono font-bold">Peticiones &rarr; De Prueba (3)</div>
+                </div>
+            </div>
+
+            <!-- Live Simulator Control Widget -->
+            <div class="glass-panel p-4 rounded-xl border border-slate-300 bg-white flex flex-col md:flex-row items-center justify-between gap-4 shadow-sm">
+                <div class="flex items-center gap-3">
+                    <div class="w-3 h-3 rounded-full bg-emerald-500 animate-ping"></div>
+                    <div class="text-xs">
+                        <span class="text-slate-600 font-medium">Estado interactivo actual:</span>
+                        <span id="sim-current-state" class="font-bold font-mono text-emerald-700 ml-1">CLOSED</span>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button onclick="simulateCBState('CLOSED')" class="px-3.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 text-xs rounded-lg transition-colors font-bold shadow-sm">
+                        Simular CLOSED
+                    </button>
+                    <button onclick="simulateCBState('OPEN')" class="px-3.5 py-1.5 bg-rose-50 hover:bg-rose-100 border border-rose-300 text-rose-800 text-xs rounded-lg transition-colors font-bold shadow-sm">
+                        Simular OPEN
+                    </button>
+                    <button onclick="simulateCBState('HALF_OPEN')" class="px-3.5 py-1.5 bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-800 text-xs rounded-lg transition-colors font-bold shadow-sm">
+                        Simular HALF-OPEN
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- SLIDE 8: 8. Nuestra Configuración -->
+        <section class="slide flex-col justify-center max-w-5xl mx-auto w-full h-full">
+            <div class="flex items-center justify-between mb-3">
+                <div class="flex items-center gap-3">
+                    <span class="text-xs font-mono px-3 py-1 bg-emerald-100 border border-emerald-200 text-emerald-800 rounded-md font-bold">SECCIÓN 08</span>
+                    <h2 class="text-2xl md:text-3xl font-bold text-slate-900">Configuración en el PoC</h2>
+                </div>
+                <span class="text-xs font-mono text-slate-700 bg-slate-200 px-3 py-1 rounded-md font-medium">Resilience4j + Spring Cloud CB</span>
+            </div>
+            <p class="text-sm text-slate-600 mb-6">Parámetros globales aplicados como default en el Orchestrator.</p>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                <!-- Parameters Table -->
+                <div class="glass-panel rounded-2xl overflow-hidden border border-slate-300 shadow-sm">
+                    <table class="w-full text-left text-xs">
+                        <thead class="bg-slate-100 text-slate-700 uppercase font-mono text-[10px] tracking-wider border-b border-slate-300">
+                            <tr>
+                                <th class="p-3.5">Parámetro</th>
+                                <th class="p-3.5 text-indigo-700 font-bold">Valor PoC</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-200 font-mono">
+                            <tr class="hover:bg-slate-50">
+                                <td class="p-3 text-slate-800 font-sans font-medium">failureRateThreshold</td>
+                                <td class="p-3 text-emerald-700 font-bold">50%</td>
+                            </tr>
+                            <tr class="hover:bg-slate-50">
+                                <td class="p-3 text-slate-800 font-sans font-medium">waitDurationInOpenState</td>
+                                <td class="p-3 text-amber-700 font-bold">10 segundos</td>
+                            </tr>
+                            <tr class="hover:bg-slate-50">
+                                <td class="p-3 text-slate-800 font-sans font-medium">slidingWindowSize</td>
+                                <td class="p-3 text-indigo-700 font-bold">10 llamadas</td>
+                            </tr>
+                            <tr class="hover:bg-slate-50">
+                                <td class="p-3 text-slate-800 font-sans font-medium">permittedNumberOfCallsInHalfOpenState</td>
+                                <td class="p-3 text-purple-700 font-bold">3 llamadas</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Explanation Cards -->
+                <div class="space-y-3">
+                    <div class="glass-panel p-4 rounded-xl border-l-4 border-l-emerald-500 bg-emerald-50/20">
+                        <h4 class="text-xs font-bold text-slate-900 mb-1">Umbral del 50% de Fallas</h4>
+                        <p class="text-xs text-slate-600 leading-relaxed">Si de las últimas 10 peticiones de la ventana 5 o más fallan, el circuito conmuta a OPEN.</p>
+                    </div>
+                    <div class="glass-panel p-4 rounded-xl border-l-4 border-l-amber-500 bg-amber-50/20">
+                        <h4 class="text-xs font-bold text-slate-900 mb-1">Espera de 10 segundos en OPEN</h4>
+                        <p class="text-xs text-slate-600 leading-relaxed">Tiempo en el que no se realiza ninguna petición al microservicio afectado, permitiéndole recuperarse.</p>
+                    </div>
+                    <div class="glass-panel p-4 rounded-xl border-l-4 border-l-purple-500 bg-purple-50/20">
+                        <h4 class="text-xs font-bold text-slate-900 mb-1">3 Llamadas de Prueba</h4>
+                        <p class="text-xs text-slate-600 leading-relaxed">En HALF-OPEN, si las 3 llamadas tienen éxito vuelve a CLOSED; si falla alguna, regresa a OPEN por otros 10s.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- SLIDE 9: 9. Los 4 Circuit Breakers Implementados -->
+        <section class="slide flex-col justify-center max-w-5xl mx-auto w-full h-full">
+            <div class="flex items-center gap-3 mb-3">
+                <span class="text-xs font-mono px-3 py-1 bg-indigo-100 border border-indigo-200 text-indigo-800 rounded-md font-bold">SECCIÓN 09</span>
+                <h2 class="text-2xl md:text-3xl font-bold text-slate-900">Los 4 Circuit Breakers Implementados</h2>
+            </div>
+            <p class="text-sm text-slate-600 mb-6">Aislamiento e independencia de máquinas de estado por cada cliente REST.</p>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                <!-- Breaker 1 -->
+                <div class="glass-panel p-4 rounded-2xl flex items-center gap-4 glass-panel-hover">
+                    <div class="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-lg shrink-0">
+                        1
+                    </div>
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <h3 class="text-sm font-bold font-mono text-indigo-800">orderService</h3>
+                            <span class="text-[10px] bg-emerald-100 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded font-mono font-bold">CLOSED</span>
+                        </div>
+                        <p class="text-xs text-slate-600 mt-1">Protege la llamada del Orchestrator a Order Service (crear, confirmar y cancelar orden).</p>
+                    </div>
+                </div>
+
+                <!-- Breaker 2 -->
+                <div class="glass-panel p-4 rounded-2xl flex items-center gap-4 border-2 border-amber-300 bg-amber-50/30 glass-panel-hover">
+                    <div class="w-10 h-10 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center font-bold text-lg shrink-0">
+                        2
+                    </div>
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <h3 class="text-sm font-bold font-mono text-amber-900">paymentService</h3>
+                            <span class="text-[10px] bg-amber-200 text-amber-900 border border-amber-400 px-2 py-0.5 rounded font-mono font-bold">Prueba Live</span>
+                        </div>
+                        <p class="text-xs text-slate-600 mt-1">Protege cobros y reembolsos. <strong class="text-amber-800">Es el que probamos apagando el servicio en vivo.</strong></p>
+                    </div>
+                </div>
+
+                <!-- Breaker 3 -->
+                <div class="glass-panel p-4 rounded-2xl flex items-center gap-4 glass-panel-hover">
+                    <div class="w-10 h-10 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center font-bold text-lg shrink-0">
+                        3
+                    </div>
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <h3 class="text-sm font-bold font-mono text-purple-800">inventoryService</h3>
+                            <span class="text-[10px] bg-emerald-100 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded font-mono font-bold">CLOSED</span>
+                        </div>
+                        <p class="text-xs text-slate-600 mt-1">Protege la reserva y liberación de stock de productos en la bodega.</p>
+                    </div>
+                </div>
+
+                <!-- Breaker 4 -->
+                <div class="glass-panel p-4 rounded-2xl flex items-center gap-4 glass-panel-hover">
+                    <div class="w-10 h-10 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-lg shrink-0">
+                        4
+                    </div>
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <h3 class="text-sm font-bold font-mono text-blue-800">shippingService</h3>
+                            <span class="text-[10px] bg-emerald-100 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded font-mono font-bold">CLOSED</span>
+                        </div>
+                        <p class="text-xs text-slate-600 mt-1">Protege la programación y cancelación del despacho logístico.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="glass-panel p-4 rounded-xl border border-indigo-200 bg-indigo-50/50 text-xs text-slate-700 flex items-center gap-3">
+                <i class="fa-solid fa-circle-info text-indigo-600 text-lg shrink-0"></i>
+                <span><strong>Independencia total:</strong> Si `paymentService` entra en estado <span class="text-rose-700 font-mono font-bold">OPEN</span> por caída, los otros 3 Circuit Breakers continúan operando normalmente en <span class="text-emerald-700 font-mono font-bold">CLOSED</span>.</span>
+            </div>
+        </section>
+
+        <!-- SLIDE 10: 10. Escenarios de Prueba (Demo Postman) -->
+        <section class="slide flex-col justify-center max-w-5xl mx-auto w-full h-full">
+            <div class="flex items-center gap-3 mb-3">
+                <span class="text-xs font-mono px-3 py-1 bg-purple-100 border border-purple-200 text-purple-800 rounded-md font-bold">SECCIÓN 10</span>
+                <h2 class="text-2xl md:text-3xl font-bold text-slate-900">Escenarios de Prueba (Demo en Postman)</h2>
+            </div>
+            <p class="text-sm text-slate-600 mb-6">Validación práctica de los 4 escenarios de negocio e infraestructura.</p>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <!-- Escenario 1 -->
+                <div class="glass-panel p-4 rounded-xl border-l-4 border-l-emerald-500 bg-emerald-50/20">
+                    <div class="flex items-center justify-between mb-1">
+                        <h3 class="text-xs font-bold text-slate-900">Escenario 1 — Flujo Feliz</h3>
+                        <span class="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded font-mono font-bold">COMPLETED</span>
+                    </div>
+                    <p class="text-xs text-slate-600 mb-2">Producto con stock, pago válido.</p>
+                    <div class="p-2.5 bg-slate-900 rounded-lg text-[11px] font-mono text-slate-200">
+                        Orden: <span class="text-emerald-400 font-bold">CONFIRMED</span> &bull; Saga: <span class="text-emerald-400 font-bold">COMPLETED</span> &bull; 4 Breakers: <span class="text-emerald-400 font-bold">CLOSED</span>
+                    </div>
+                </div>
+
+                <!-- Escenario 2 -->
+                <div class="glass-panel p-4 rounded-xl border-l-4 border-l-amber-500 bg-amber-50/20">
+                    <div class="flex items-center justify-between mb-1">
+                        <h3 class="text-xs font-bold text-slate-900">Escenario 2 — Fallo en Payment</h3>
+                        <span class="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-mono font-bold">COMPENSATED (Corta)</span>
+                    </div>
+                    <p class="text-xs text-slate-600 mb-2"><code class="text-amber-800 font-mono font-semibold">simulatePaymentFailure: true</code></p>
+                    <div class="p-2.5 bg-slate-900 rounded-lg text-[11px] font-mono text-slate-200">
+                        Orden: <span class="text-amber-400 font-bold">CANCELLED</span> &bull; No se genera registro de pago ni se llama a inventario.
+                    </div>
+                </div>
+
+                <!-- Escenario 3 -->
+                <div class="glass-panel p-4 rounded-xl border-l-4 border-l-rose-500 bg-rose-50/20">
+                    <div class="flex items-center justify-between mb-1">
+                        <h3 class="text-xs font-bold text-slate-900">Escenario 3 — Fallo en Inventory</h3>
+                        <span class="text-[10px] bg-rose-100 text-rose-800 px-2 py-0.5 rounded font-mono font-bold">COMPENSATED (Completa)</span>
+                    </div>
+                    <p class="text-xs text-slate-600 mb-2">Producto sin stock (`PROD-002`).</p>
+                    <div class="p-2.5 bg-slate-900 rounded-lg text-[11px] font-mono text-slate-200">
+                        Se reembolsa el pago previo + Se cancela la orden de compra.
+                    </div>
+                </div>
+
+                <!-- Escenario 4 -->
+                <div class="glass-panel p-4 rounded-xl border-l-4 border-l-purple-500 bg-purple-50/20">
+                    <div class="flex items-center justify-between mb-1">
+                        <h3 class="text-xs font-bold text-slate-900">Escenario 4 — Circuit Breaker en Acción</h3>
+                        <span class="text-[10px] bg-purple-100 text-purple-800 px-2 py-0.5 rounded font-mono font-bold">CLOSED &rarr; OPEN &rarr; HALF_OPEN</span>
+                    </div>
+                    <p class="text-xs text-slate-600 mb-2">Se apaga Payment Service + peticiones masivas.</p>
+                    <div class="p-2.5 bg-slate-900 rounded-lg text-[11px] font-mono text-slate-200">
+                        Verificación vía <code class="text-purple-300">/actuator/circuitbreakers</code> y <code class="text-purple-300">/actuator/circuitbreakerevents/paymentService</code>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- SLIDE 11: 11. Hallazgo del Análisis Crítico -->
+        <section class="slide flex-col justify-center max-w-5xl mx-auto w-full h-full">
+            <div class="flex items-center gap-3 mb-3">
+                <span class="text-xs font-mono px-3 py-1 bg-rose-100 border border-rose-200 text-rose-800 rounded-md font-bold">SECCIÓN 11</span>
+                <h2 class="text-2xl md:text-3xl font-bold text-slate-900">Hallazgo del Análisis Crítico</h2>
+            </div>
+            <p class="text-sm text-slate-600 mb-6">Diferenciando excepciones de negocio vs fallos de infraestructura.</p>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                <!-- Problema detectado -->
+                <div class="glass-panel p-6 rounded-2xl border-t-4 border-rose-500 bg-gradient-to-b from-rose-50/30 to-white">
+                    <div class="flex items-center gap-2 text-rose-800 font-bold text-sm mb-3">
+                        <i class="fa-solid fa-bug text-lg"></i> Comportamiento No Deseado
+                    </div>
+                    <p class="text-xs text-slate-700 leading-relaxed mb-4">
+                        Por defecto, el Circuit Breaker contaba como <strong class="text-rose-800">"FALLO"</strong> tanto un rechazo legítimo de negocio (tarjeta sin fondos, el servicio respondió 200/400) como una caída real de red (ConnectException, 503).
+                    </p>
+                    <div class="p-3.5 bg-rose-100 border border-rose-300 rounded-xl text-xs text-rose-900 font-medium">
+                        &rArr; Un número alto de pagos rechazados por falta de saldo abría el circuito injustificadamente.
+                    </div>
+                </div>
+
+                <!-- Solución propuesta -->
+                <div class="glass-panel p-6 rounded-2xl border-t-4 border-emerald-500 bg-gradient-to-b from-emerald-50/30 to-white">
+                    <div class="flex items-center gap-2 text-emerald-800 font-bold text-sm mb-3">
+                        <i class="fa-solid fa-code text-lg"></i> Solución con Resilience4j
+                    </div>
+                    <p class="text-xs text-slate-700 leading-relaxed mb-4">
+                        Configurar <code class="text-emerald-800 font-mono bg-emerald-100 px-1.5 py-0.5 rounded font-bold border border-emerald-200">ignoreExceptions()</code> para excluir las excepciones de negocio del conteo del porcentaje de fallos.
+                    </p>
+
+                    <div class="p-3.5 bg-slate-900 border border-slate-700 rounded-xl font-mono text-[11px] text-emerald-300 shadow-sm">
+                        CircuitBreakerConfig.custom()<br/>
+                        &nbsp;&nbsp;.ignoreExceptions(<span class="text-white">BusinessPaymentException.class</span>)<br/>
+                        &nbsp;&nbsp;.build();
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- SLIDE 12: 12. Conclusiones -->
+        <section class="slide flex-col justify-center max-w-5xl mx-auto w-full h-full">
+            <div class="flex items-center gap-3 mb-3">
+                <span class="text-xs font-mono px-3 py-1 bg-indigo-100 border border-indigo-200 text-indigo-800 rounded-md font-bold">SECCIÓN 12</span>
+                <h2 class="text-2xl md:text-3xl font-bold text-slate-900">Conclusiones Clave</h2>
+            </div>
+            <p class="text-sm text-slate-600 mb-6">Sinergia entre Saga y Circuit Breaker en arquitecturas enterprise.</p>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                <!-- Saga summary -->
+                <div class="glass-panel p-6 rounded-2xl border-l-4 border-l-indigo-600 glass-panel-hover">
+                    <div class="flex items-center gap-3 mb-3">
+                        <i class="fa-solid fa-diagram-project text-2xl text-indigo-600"></i>
+                        <h3 class="text-base font-bold text-slate-900">Saga Orquestada</h3>
+                    </div>
+                    <ul class="space-y-2.5 text-xs text-slate-700">
+                        <li class="flex items-start gap-2">
+                            <i class="fa-solid fa-check text-indigo-600 mt-0.5"></i>
+                            <span>Garantiza <strong class="text-slate-900">Consistencia Eventual</strong> mediante compensaciones explícitas.</span>
+                        </li>
+                        <li class="flex items-start gap-2">
+                            <i class="fa-solid fa-check text-indigo-600 mt-0.5"></i>
+                            <span>Proporciona una trazabilidad clara del estado exacto del flujo de negocio.</span>
+                        </li>
+                    </ul>
+                </div>
+
+                <!-- CB summary -->
+                <div class="glass-panel p-6 rounded-2xl border-l-4 border-l-emerald-600 glass-panel-hover">
+                    <div class="flex items-center gap-3 mb-3">
+                        <i class="fa-solid fa-shield-halved text-2xl text-emerald-600"></i>
+                        <h3 class="text-base font-bold text-slate-900">Circuit Breaker</h3>
+                    </div>
+                    <ul class="space-y-2.5 text-xs text-slate-700">
+                        <li class="flex items-start gap-2">
+                            <i class="fa-solid fa-check text-emerald-600 mt-0.5"></i>
+                            <span>Resiliencia comprobada en sus 3 estados con recuperación automática.</span>
+                        </li>
+                        <li class="flex items-start gap-2">
+                            <i class="fa-solid fa-check text-emerald-600 mt-0.5"></i>
+                            <span>Gran observabilidad en tiempo real a través de Spring Boot Actuator.</span>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Golden Rule Banner -->
+            <div class="glass-panel p-5 rounded-xl border border-amber-300 bg-amber-50 flex items-center gap-4 shadow-sm">
+                <i class="fa-solid fa-triangle-exclamation text-amber-600 text-2xl shrink-0"></i>
+                <p class="text-xs text-slate-800 leading-relaxed">
+                    <strong class="text-slate-900">Regla de Oro:</strong> Ambos patrones exigen un diseño metódico y adaptado al negocio, evitando depender ciegamente de las configuraciones por defecto de las librerías.
+                </p>
+            </div>
+        </section>
+
+        <!-- SLIDE 13: Interactive Saga Visual Simulator -->
+        <section class="slide flex-col justify-center max-w-5xl mx-auto w-full h-full">
+            <div class="flex items-center justify-between mb-2">
+                <div class="flex items-center gap-3">
+                    <span class="text-xs font-mono px-3 py-1 bg-indigo-100 border border-indigo-200 text-indigo-800 rounded-md font-bold">DEMO INTERACTIVA</span>
+                    <h2 class="text-2xl md:text-3xl font-bold text-slate-900">Simulador de Flujo Saga PoC</h2>
+                </div>
+                <button onclick="resetSagaDemo()" class="text-xs bg-white hover:bg-slate-100 text-slate-700 font-semibold px-3 py-1.5 rounded-lg border border-slate-300 transition-colors shadow-sm">
+                    <i class="fa-solid fa-rotate-right mr-1"></i> Reiniciar
+                </button>
+            </div>
+            <p class="text-sm text-slate-600 mb-6">Ejecuta el flujo paso a paso o simula un fallo para ver la compensación en tiempo real.</p>
+
+            <!-- Steps Grid -->
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-3 mb-6">
+                <!-- Step 1 Order -->
+                <div id="saga-step-1" class="glass-panel p-4 rounded-xl border-2 border-slate-300 text-center transition-all bg-white">
+                    <div class="text-xs font-mono text-slate-500 mb-1">Paso 1</div>
+                    <div class="font-bold text-sm text-slate-900 mb-2">Order Service</div>
+                    <div id="saga-status-1" class="text-[10px] font-mono bg-slate-100 text-slate-600 px-2 py-1 rounded font-bold">PENDING</div>
+                </div>
+
+                <!-- Step 2 Payment -->
+                <div id="saga-step-2" class="glass-panel p-4 rounded-xl border-2 border-slate-300 text-center transition-all bg-white">
+                    <div class="text-xs font-mono text-slate-500 mb-1">Paso 2</div>
+                    <div class="font-bold text-sm text-slate-900 mb-2">Payment Service</div>
+                    <div id="saga-status-2" class="text-[10px] font-mono bg-slate-100 text-slate-600 px-2 py-1 rounded font-bold">PENDING</div>
+                </div>
+
+                <!-- Step 3 Inventory -->
+                <div id="saga-step-3" class="glass-panel p-4 rounded-xl border-2 border-slate-300 text-center transition-all bg-white">
+                    <div class="text-xs font-mono text-slate-500 mb-1">Paso 3</div>
+                    <div class="font-bold text-sm text-slate-900 mb-2">Inventory Service</div>
+                    <div id="saga-status-3" class="text-[10px] font-mono bg-slate-100 text-slate-600 px-2 py-1 rounded font-bold">PENDING</div>
+                </div>
+
+                <!-- Step 4 Shipping -->
+                <div id="saga-step-4" class="glass-panel p-4 rounded-xl border-2 border-slate-300 text-center transition-all bg-white">
+                    <div class="text-xs font-mono text-slate-500 mb-1">Paso 4</div>
+                    <div class="font-bold text-sm text-slate-900 mb-2">Shipping Service</div>
+                    <div id="saga-status-4" class="text-[10px] font-mono bg-slate-100 text-slate-600 px-2 py-1 rounded font-bold">PENDING</div>
+                </div>
+            </div>
+
+            <!-- Saga Output Logs -->
+            <div class="glass-panel p-4 rounded-xl border border-slate-300 font-mono text-xs bg-slate-900 text-slate-100 mb-6 h-32 overflow-y-auto custom-scrollbar shadow-inner" id="saga-log-container">
+                <div class="text-slate-400">// Presiona los botones inferiores para simular un escenario...</div>
+            </div>
+
+            <!-- Control Buttons -->
+            <div class="flex flex-wrap justify-center gap-3">
+                <button onclick="runSagaSimulation('SUCCESS')" class="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-md transition-colors">
+                    <i class="fa-solid fa-play mr-1.5"></i> Flujo Feliz (Éxito Total)
+                </button>
+                <button onclick="runSagaSimulation('PAYMENT_FAIL')" class="px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-xl shadow-md transition-colors">
+                    <i class="fa-solid fa-ban mr-1.5"></i> Fallo en Payment (Compensar Orden)
+                </button>
+                <button onclick="runSagaSimulation('INVENTORY_FAIL')" class="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-md transition-colors">
+                    <i class="fa-solid fa-box-open mr-1.5"></i> Fallo en Inventario (Compensar Pago y Orden)
+                </button>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Navigation Footer -->
+    <footer class="w-full glass-panel border-t border-slate-200 px-6 py-3 flex items-center justify-between shrink-0 z-50">
+        <button id="prev-btn" onclick="prevSlide()" class="px-4 py-2 bg-white hover:bg-slate-100 text-slate-700 text-xs font-bold rounded-xl border border-slate-300 transition-all flex items-center gap-2 shadow-sm">
+            <i class="fa-solid fa-chevron-left"></i> Anterior
+        </button>
+
+        <div class="hidden md:flex items-center gap-1.5" id="dots-container">
+            <!-- Dots dynamically generated -->
+        </div>
+
+        <button id="next-btn" onclick="nextSlide()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-md shadow-indigo-600/20 transition-all flex items-center gap-2">
+            Siguiente <i class="fa-solid fa-chevron-right"></i>
+        </button>
+    </footer>
+
+    <script>
+        // Slide deck configuration
+        let currentSlide = 0;
+        const slides = document.querySelectorAll('.slide');
+        const totalSlides = slides.length;
+
+        document.getElementById('total-slides-num').innerText = totalSlides;
+
+        // Initialize dots
+        const dotsContainer = document.getElementById('dots-container');
+        slides.forEach((_, idx) => {
+            const dot = document.createElement('button');
+            dot.className = `w-2.5 h-2.5 rounded-full transition-all ${idx === 0 ? 'bg-indigo-600 w-6' : 'bg-slate-300 hover:bg-slate-400'}`;
+            dot.onclick = () => goToSlide(idx);
+            dotsContainer.appendChild(dot);
+        });
+
+        function updateSlideUI() {
+            slides.forEach((slide, idx) => {
+                slide.classList.toggle('active', idx === currentSlide);
+            });
+
+            // Update Header slide number
+            document.getElementById('current-slide-num').innerText = currentSlide + 1;
+
+            // Update Progress bar
+            const progressPct = ((currentSlide + 1) / totalSlides) * 100;
+            document.getElementById('progress-bar').style.width = `${progressPct}%`;
+
+            // Update Dots
+            const dots = dotsContainer.children;
+            Array.from(dots).forEach((dot, idx) => {
+                if (idx === currentSlide) {
+                    dot.className = 'w-6 h-2.5 rounded-full bg-indigo-600 transition-all';
+                } else {
+                    dot.className = 'w-2.5 h-2.5 rounded-full bg-slate-300 hover:bg-slate-400 transition-all';
+                }
+            });
+
+            // Update buttons
+            document.getElementById('prev-btn').disabled = currentSlide === 0;
+            document.getElementById('prev-btn').style.opacity = currentSlide === 0 ? '0.5' : '1';
+
+            if (currentSlide === totalSlides - 1) {
+                document.getElementById('next-btn').innerHTML = 'Inicio <i class="fa-solid fa-rotate-right"></i>';
+            } else {
+                document.getElementById('next-btn').innerHTML = 'Siguiente <i class="fa-solid fa-chevron-right"></i>';
+            }
+        }
+
+        function nextSlide() {
+            if (currentSlide < totalSlides - 1) {
+                currentSlide++;
+            } else {
+                currentSlide = 0;
+            }
+            updateSlideUI();
+        }
+
+        function prevSlide() {
+            if (currentSlide > 0) {
+                currentSlide--;
+                updateSlideUI();
+            }
+        }
+
+        function goToSlide(index) {
+            currentSlide = index;
+            updateSlideUI();
+        }
+
+        // Keyboard Navigation
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowRight' || e.key === ' ') {
+                nextSlide();
+            } else if (e.key === 'ArrowLeft') {
+                prevSlide();
+            } else if (e.key === 'Home') {
+                goToSlide(0);
+            } else if (e.key === 'End') {
+                goToSlide(totalSlides - 1);
+            }
+        });
+
+        // Fullscreen toggle
+        function toggleFullscreen() {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(err => {
+                    console.log(`Error attempting to enable fullscreen: ${err.message}`);
+                });
+            } else {
+                if (document.exitFullscreen) {
+                    document.exitFullscreen();
+                }
+            }
+        }
+
+        // Circuit Breaker State Visualizer Logic
+        function simulateCBState(state) {
+            const closedCard = document.getElementById('state-closed-card');
+            const openCard = document.getElementById('state-open-card');
+            const halfOpenCard = document.getElementById('state-halfopen-card');
+            const stateText = document.getElementById('sim-current-state');
+
+            // Reset opacity and border
+            [closedCard, openCard, halfOpenCard].forEach(card => {
+                card.style.opacity = '0.5';
+                card.className = "glass-panel p-5 rounded-2xl border border-slate-300 relative overflow-hidden transition-all duration-300";
+            });
+
+            if (state === 'CLOSED') {
+                closedCard.style.opacity = '1';
+                closedCard.className = "glass-panel p-5 rounded-2xl border-2 border-emerald-500 bg-emerald-50/40 relative overflow-hidden transition-all duration-300 shadow-md";
+                stateText.className = 'font-bold font-mono text-emerald-700 ml-1';
+                stateText.innerText = 'CLOSED';
+            } else if (state === 'OPEN') {
+                openCard.style.opacity = '1';
+                openCard.className = "glass-panel p-5 rounded-2xl border-2 border-rose-500 bg-rose-50/40 relative overflow-hidden transition-all duration-300 shadow-md";
+                stateText.className = 'font-bold font-mono text-rose-700 ml-1';
+                stateText.innerText = 'OPEN';
+            } else if (state === 'HALF_OPEN') {
+                halfOpenCard.style.opacity = '1';
+                halfOpenCard.className = "glass-panel p-5 rounded-2xl border-2 border-amber-500 bg-amber-50/40 relative overflow-hidden transition-all duration-300 shadow-md";
+                stateText.className = 'font-bold font-mono text-amber-700 ml-1';
+                stateText.innerText = 'HALF-OPEN';
+            }
+        }
+
+        // Interactive Saga Simulation
+        let sagaRunning = false;
+
+        function resetSagaDemo() {
+            sagaRunning = false;
+            for (let i = 1; i <= 4; i++) {
+                const card = document.getElementById(`saga-step-${i}`);
+                const status = document.getElementById(`saga-status-${i}`);
+                card.className = "glass-panel p-4 rounded-xl border-2 border-slate-300 text-center transition-all bg-white";
+                status.className = "text-[10px] font-mono bg-slate-100 text-slate-600 px-2 py-1 rounded font-bold";
+                status.innerText = "PENDING";
+            }
+            const logContainer = document.getElementById('saga-log-container');
+            logContainer.innerHTML = '<div class="text-slate-400">// Presiona los botones inferiores para simular un escenario...</div>';
+        }
+
+        function logSagaMsg(msg, colorClass = "text-slate-200") {
+            const logContainer = document.getElementById('saga-log-container');
+            const line = document.createElement('div');
+            line.className = `${colorClass} mb-1`;
+            line.innerHTML = `> ${msg}`;
+            logContainer.appendChild(line);
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
+
+        function setStepStatus(stepNum, statusText, cardBorderClass, statusBadgeClass) {
+            const card = document.getElementById(`saga-step-${stepNum}`);
+            const status = document.getElementById(`saga-status-${stepNum}`);
+            card.className = `glass-panel p-4 rounded-xl border-2 ${cardBorderClass} text-center transition-all shadow-sm`;
+            status.className = `text-[10px] font-mono ${statusBadgeClass} px-2 py-1 rounded font-bold`;
+            status.innerText = statusText;
+        }
+
+        async function runSagaSimulation(scenario) {
+            if (sagaRunning) return;
+            sagaRunning = true;
+            resetSagaDemo();
+            const logContainer = document.getElementById('saga-log-container');
+            logContainer.innerHTML = '';
+
+            logSagaMsg(`Iniciando Saga Orchestration: Escenario ${scenario}`, "text-indigo-300 font-bold");
+
+            // Step 1: Order
+            await new Promise(r => setTimeout(r, 400));
+            setStepStatus(1, 'SUCCESS', 'border-emerald-500 bg-emerald-50/60', 'bg-emerald-100 text-emerald-800 border border-emerald-300');
+            logSagaMsg("Order Service: Orden creada en PENDING (T1 OK)", "text-emerald-400");
+
+            if (scenario === 'SUCCESS') {
+                // Step 2: Payment
+                await new Promise(r => setTimeout(r, 500));
+                setStepStatus(2, 'SUCCESS', 'border-emerald-500 bg-emerald-50/60', 'bg-emerald-100 text-emerald-800 border border-emerald-300');
+                logSagaMsg("Payment Service: Pago cobrado exitosamente (T2 OK)", "text-emerald-400");
+
+                // Step 3: Inventory
+                await new Promise(r => setTimeout(r, 500));
+                setStepStatus(3, 'SUCCESS', 'border-emerald-500 bg-emerald-50/60', 'bg-emerald-100 text-emerald-800 border border-emerald-300');
+                logSagaMsg("Inventory Service: Stock reservado (T3 OK)", "text-emerald-400");
+
+                // Step 4: Shipping
+                await new Promise(r => setTimeout(r, 500));
+                setStepStatus(4, 'SUCCESS', 'border-emerald-500 bg-emerald-50/60', 'bg-emerald-100 text-emerald-800 border border-emerald-300');
+                logSagaMsg("Shipping Service: Despacho programado (T4 OK)", "text-emerald-400");
+
+                logSagaMsg("Saga Finalizada: Orden CONFIRMED, Estado COMPLETED", "text-emerald-300 font-bold");
+            } else if (scenario === 'PAYMENT_FAIL') {
+                // Step 2 Fail
+                await new Promise(r => setTimeout(r, 500));
+                setStepStatus(2, 'FAILED', 'border-rose-500 bg-rose-50/60', 'bg-rose-100 text-rose-800 border border-rose-300');
+                logSagaMsg("Payment Service: Error al cobro - Fondos insuficientes (T2 FALLÓ)", "text-rose-400 font-bold");
+
+                // Compensate 1
+                await new Promise(r => setTimeout(r, 500));
+                setStepStatus(1, 'COMPENSATED', 'border-amber-500 bg-amber-50/60', 'bg-amber-100 text-amber-800 border border-amber-300');
+                logSagaMsg("Saga Orchestrator: Ejecutando compensación C1 (Cancelar Orden)", "text-amber-300");
+
+                logSagaMsg("Saga Finalizada con Compensación Corta: Orden CANCELLED", "text-amber-300 font-bold");
+            } else if (scenario === 'INVENTORY_FAIL') {
+                // Step 2 Success
+                await new Promise(r => setTimeout(r, 500));
+                setStepStatus(2, 'SUCCESS', 'border-emerald-500 bg-emerald-50/60', 'bg-emerald-100 text-emerald-800 border border-emerald-300');
+                logSagaMsg("Payment Service: Pago cobrado exitosamente (T2 OK)", "text-emerald-400");
+
+                // Step 3 Fail
+                await new Promise(r => setTimeout(r, 500));
+                setStepStatus(3, 'FAILED', 'border-rose-500 bg-rose-50/60', 'bg-rose-100 text-rose-800 border border-rose-300');
+                logSagaMsg("Inventory Service: Sin stock disponible para PROD-002 (T3 FALLÓ)", "text-rose-400 font-bold");
+
+                // Compensate 2 & 1
+                await new Promise(r => setTimeout(r, 500));
+                setStepStatus(2, 'COMPENSATED', 'border-amber-500 bg-amber-50/60', 'bg-amber-100 text-amber-800 border border-amber-300');
+                logSagaMsg("Saga Orchestrator: Ejecutando compensación C2 (Reembolsar Pago)", "text-amber-300");
+
+                await new Promise(r => setTimeout(r, 500));
+                setStepStatus(1, 'COMPENSATED', 'border-amber-500 bg-amber-50/60', 'bg-amber-100 text-amber-800 border border-amber-300');
+                logSagaMsg("Saga Orchestrator: Ejecutando compensación C1 (Cancelar Orden)", "text-amber-300");
+
+                logSagaMsg("Saga Finalizada con Compensación Completa: Pago Reembolsado & Orden Cancelada", "text-amber-300 font-bold");
+            }
+            sagaRunning = false;
+        }
+
+        // Initialize UI
+        updateSlideUI();
+    </script>
+</body>
+</html>
